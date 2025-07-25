@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VLESS & VMess 终极节点生成工具</title>
+    <!-- Bootstrap 5.3.3 CDN -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f0f2f5; }
+        .container { max-width: 900px; }
+        .card-header { font-weight: bold; background-color: #f8f9fa; }
+        .estimation { font-weight: bold; color: #0d6efd; text-align: center; padding: 0.5rem; background-color: #e7f3ff; border-radius: 0.25rem; }
+        #region-selector { display: flex; flex-wrap: wrap; gap: 10px 20px; padding: 10px; border: 1px solid #e0e0e0; border-radius: 5px; }
+        .region-checkbox { display: flex; align-items: center; }
+        .region-checkbox label { margin-bottom: 0; margin-left: 5px; font-weight: normal;}
+    </style>
+</head>
+<body>
+    <div class="container my-4">
+        <div class="text-center mb-4">
+            <h1 class="display-5">终极节点生成器</h1>
+            <p class="lead text-muted">一个强大、灵活的在线节点批量生成工具</p>
+        </div>
+
+        <div class="alert alert-info">
+            <h4 class="alert-heading">使用说明</h4>
+            <ol class="mb-0">
+                <li>在“第一步”区域，选择“内置数据”或“手动粘贴”来提供地址。</li>
+                <li>在“第二步”粘贴一个 VLESS 或 VMess 链接作为模板。</li>
+                <li>点击“生成节点”即可获取多个节点链接。</li>
+            </ol>
+        </div>
+        
+        <div class="card mb-3">
+            <div class="card-header">第一步：提供数据源</div>
+            <div class="card-body">
+                <ul class="nav nav-tabs" id="sourceTab" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="builtin-tab" data-bs-toggle="tab" data-bs-target="#builtin-tab-pane" type="button" onclick="updateEstimation()">内置地区数据</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="manual-tab" data-bs-toggle="tab" data-bs-target="#manual-tab-pane" type="button" onclick="updateEstimation()">自定义粘贴数据</button>
+                    </li>
+                </ul>
+                <div class="tab-content" id="sourceTabContent">
+                    <div class="tab-pane fade show active p-3" id="builtin-tab-pane" role="tabpanel">
+                        <p class="text-muted">请勾选您想使用的内置数据源：</p>
+                        <div id="region-selector"><!-- Region checkboxes will be inserted here --></div>
+                    </div>
+                    <div class="tab-pane fade p-3" id="manual-tab-pane" role="tabpanel">
+                        <div class="mb-3"><label for="ipv4Manual" class="form-label">IPv4 地址/CIDR:</label><textarea class="form-control" id="ipv4Manual" rows="3" oninput="updateEstimation()"></textarea></div>
+                        <div class="mb-3"><label for="ipv6Manual" class="form-label">IPv6 地址/CIDR:</label><textarea class="form-control" id="ipv6Manual" rows="3" oninput="updateEstimation()"></textarea></div>
+                        <div class="mb-3"><label for="domainManual" class="form-label">域名:</label><textarea class="form-control" id="domainManual" rows="3" oninput="updateEstimation()"></textarea></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card mb-3">
+            <div class="card-header">第二步：设置模板和选项</div>
+            <div class="card-body">
+                <div class="mb-3"><label for="templateUrl" class="form-label">粘贴模板节点:</label><input type="text" class="form-control" id="templateUrl" placeholder="vless://... 或 vmess://..."></div>
+                <p id="estimation" class="estimation">准备就绪</p>
+            </div>
+        </div>
+        
+        <div class="card mb-3">
+            <div class="card-header">第三步：生成节点</div>
+            <div class="card-body">
+                <div class="mb-3"><label for="quantity" class="form-label">生成数量:</label><input type="number" class="form-control" id="quantity" value="20" min="1"></div>
+                <div class="d-grid"><button class="btn btn-primary btn-lg" onclick="generateNodes()">生成节点</button></div>
+            </div>
+        </div>
+
+        <div class="card">
+             <div class="card-header">生成结果</div>
+             <div class="card-body">
+                <textarea class="form-control" id="output" rows="10" readonly></textarea>
+                <div class="d-grid mt-3"><button class="btn btn-success" id="copyButton" onclick="copyResults()">一键复制</button></div>
+             </div>
+        </div>
+         <footer class="text-center text-muted mt-4"><p>由 Gemini 构建的 Cloudflare Pages 页面</p></footer>
+    </div>
+
+    <!-- Load Data and Scripts -->
+    <script src="data.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const httpsPorts = [443, 8443, 2053, 2083, 2087, 2096];
+
+        function parseCIDR(cidr) { try { const [ip, prefixStr] = cidr.split('/'); const prefix = parseInt(prefixStr, 10); if (ip.includes('.')) { if (isNaN(prefix) || prefix < 0 || prefix > 32) return null; const parts = ip.split('.').map(Number); if (parts.length !== 4 || parts.some(p => isNaN(p) || p < 0 || p > 255)) return null; const ipBigInt = (BigInt(parts[0]) << 24n) | (BigInt(parts[1]) << 16n) | (BigInt(parts[2]) << 8n) | BigInt(parts[3]); const mask = (1n << BigInt(32 - prefix)) - 1n; return { network: ipBigInt & ~mask, prefix: prefix, type: 'v4' }; } else { if (isNaN(prefix) || prefix < 0 || prefix > 128) return null; let fullIp = ip; if (ip.includes('::')) { const [left, right] = ip.split('::'); const leftParts = left.split(':').filter(Boolean); const rightParts = right.split(':').filter(Boolean); const middleZeros = Array(8 - leftParts.length - rightParts.length).fill('0'); fullIp = [...leftParts, ...middleZeros, ...rightParts].join(':'); } const parts = fullIp.split(':'); if(parts.length !== 8) return null; let ipBigInt = 0n; for (const part of parts) { const num = parseInt(part, 16); if (isNaN(num)) return null; ipBigInt = (ipBigInt << 16n) | BigInt(num); } const mask = (1n << BigInt(128 - prefix)) - 1n; return { network: ipBigInt & ~mask, prefix: prefix, type: 'v6' }; } } catch { return null; } }
+        function getRandomIP(range) { const bits = range.type === 'v4' ? 32 : 128; if (range.prefix === bits) { const ip = range.network; if(range.type === 'v4') return [(ip >> 24n) & 255n, (ip >> 16n) & 255n, (ip >> 8n) & 255n, ip & 255n].join('.'); const parts = []; for (let i = 0; i < 8; i++) parts.unshift(((ip >> BigInt(i*16)) & 0xffffn).toString(16)); return parts.join(':'); } const hostBits = BigInt(bits - range.prefix); const randomHost = BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)) % (1n << hostBits); const ip = range.network + randomHost; if (range.type === 'v4') return [(ip >> 24n) & 255n, (ip >> 16n) & 255n, (ip >> 8n) & 255n, ip & 255n].join('.'); const parts = []; for (let i = 0; i < 8; i++) parts.unshift(((ip >> BigInt(i*16)) & 0xffffn).toString(16)); return parts.join(':').replace(/(^|:)(0:)+/g, '::').replace(/^::$/, '0::0'); }
+        
+        function updateEstimation() {
+            let totalAddressSources = 0;
+            const isBuiltinTabActive = document.getElementById('builtin-tab').classList.contains('active');
+            
+            if (isBuiltinTabActive) {
+                const selectedRegions = Array.from(document.querySelectorAll('#region-selector input[type="checkbox"]:checked')).map(cb => cb.value);
+                selectedRegions.forEach(region => {
+                    const data = dataByCountry[region];
+                    if (data.ipv4) totalAddressSources += data.ipv4.length;
+                    if (data.ipv6) totalAddressSources += data.ipv6.length;
+                    if (data.domains) totalAddressSources += data.domains.length;
+                });
+            } else {
+                totalAddressSources += document.getElementById('ipv4Manual').value.trim().split('\n').filter(Boolean).length;
+                totalAddressSources += document.getElementById('ipv6Manual').value.trim().split('\n').filter(Boolean).length;
+                totalAddressSources += document.getElementById('domainManual').value.trim().split('\n').filter(Boolean).length;
+            }
+            
+            const totalCombinations = totalAddressSources * httpsPorts.length;
+            document.getElementById('estimation').textContent = `当前配置可生成 ${totalCombinations} 个不重复的“地址:端口”组合`;
+        }
+
+        function safeBase64Decode(str) { try { return atob(str.replace(/-/g, '+').replace(/_/g, '/')); } catch { return null; } }
+
+        function generateNodes() {
+            const templateUrl = document.getElementById('templateUrl').value.trim();
+            const quantity = parseInt(document.getElementById('quantity').value, 10);
+            if (!templateUrl || isNaN(quantity) || quantity < 1) { alert('请确保模板链接和生成数量已正确填写！'); return; }
+
+            const addressPool = [];
+            const isBuiltinTabActive = document.getElementById('builtin-tab').classList.contains('active');
+
+            if (isBuiltinTabActive) {
+                const selectedRegions = Array.from(document.querySelectorAll('#region-selector input[type="checkbox"]:checked')).map(cb => cb.value);
+                if (selectedRegions.length === 0) { alert('请至少选择一个内置地区数据源！'); return; }
+                selectedRegions.forEach(region => {
+                    const data = dataByCountry[region];
+                    if (data.ipv4) addressPool.push(...data.ipv4.map(parseCIDR).filter(Boolean));
+                    if (data.ipv6) addressPool.push(...data.ipv6.map(parseCIDR).filter(Boolean));
+                    if (data.domains) addressPool.push(...data.domains);
+                });
+            } else {
+                addressPool.push(...document.getElementById('ipv4Manual').value.trim().split('\n').filter(Boolean).map(parseCIDR).filter(Boolean));
+                addressPool.push(...document.getElementById('ipv6Manual').value.trim().split('\n').filter(Boolean).map(parseCIDR).filter(Boolean));
+                addressPool.push(...document.getElementById('domainManual').value.trim().split('\n').filter(Boolean));
+            }
+            
+            if (addressPool.length === 0) { alert('地址池为空！请检查所选的数据是否有效。'); return; }
+            
+            let generatedNodes = [];
+            const protocol = templateUrl.split('://')[0];
+
+            for (let i = 0; i < quantity; i++) {
+                const randomItem = addressPool[Math.floor(Math.random() * addressPool.length)];
+                let randomAddress = (typeof randomItem === 'string') ? randomItem : (randomItem.type === 'v6' ? `[${getRandomIP(randomItem)}]` : getRandomIP(randomItem));
+                const randomPort = httpsPorts[Math.floor(Math.random() * httpsPorts.length)];
+                
+                if (protocol === 'vless') {
+                    const match = templateUrl.match(/^vless:\/\/([^@]+)@([^:]+):(\d+)(.*)$/);
+                    if (!match) { alert('VLESS 模板链接格式无法解析。请确保格式为 vless://...@address:port?...'); return; }
+                    generatedNodes.push(`vless://${match[1]}@${randomAddress}:${randomPort}${match[4]}`);
+                } else if (protocol === 'vmess') {
+                    if (randomAddress.startsWith('[')) randomAddress = randomAddress.slice(1, -1);
+                    const base64Part = templateUrl.substring("vmess://".length);
+                    const decodedStr = safeBase64Decode(base64Part);
+                    if (!decodedStr) { alert('VMess 模板链接解码失败！'); return; }
+                    try {
+                        let config = JSON.parse(decodedStr);
+                        if (config.add === undefined || config.port === undefined) { alert('VMess模板JSON不含add或port字段'); return; }
+                        config.add = randomAddress;
+                        config.port = randomPort.toString();
+                        const regionName = isBuiltinTabActive ? (Array.from(document.querySelectorAll('#region-selector input[type="checkbox"]:checked')).map(cb=>cb.value)[0] || 'MIX').split(' ')[0] : 'Custom';
+                        config.ps = `${config.ps || 'VMess'}_(${regionName})_${i + 1}`;
+                        generatedNodes.push("vmess://" + btoa(JSON.stringify(config)));
+                    } catch(e) { alert('VMess 配置的 JSON 格式解析失败！'); return; }
+                } else { alert('不支持的协议类型！请输入 vless:// 或 vmess:// 链接。'); return; }
+            }
+            document.getElementById('output').value = generatedNodes.join('\n');
+        }
+
+        function copyResults() {
+            const outputText = document.getElementById('output');
+            if (!outputText.value) { alert('没有可复制的内容！'); return; }
+            navigator.clipboard.writeText(outputText.value).then(() => {
+                alert('已成功复制 ' + outputText.value.split('\n').length + ' 个节点到剪贴板！');
+            }).catch(err => {
+                try {
+                    outputText.select();
+                    document.execCommand('copy');
+                    alert('自动复制失败，但已为您全选文本，请按 Ctrl+C 手动复制。');
+                } catch (e) { alert('复制失败，请手动复制。'); }
+            });
+        }
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            const regionSelector = document.getElementById('region-selector');
+            let checkboxesHTML = '';
+            for (const region in dataByCountry) {
+                checkboxesHTML += `
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="checkbox" id="region-${region.replace(/[^a-zA-Z0-9]/g, '-')}" value="${region}" checked onchange="updateEstimation()">
+                        <label class="form-check-label" for="region-${region.replace(/[^a-zA-Z0-9]/g, '-')}">${region}</label>
+                    </div>`;
+            }
+            regionSelector.innerHTML = checkboxesHTML;
+            
+            // Add event listeners to tabs to update estimation
+            document.querySelectorAll('#sourceTab button').forEach(tab => {
+                tab.addEventListener('shown.bs.tab', updateEstimation);
+            });
+            updateEstimation();
+        });
+    </script>
+</body>
+</html>

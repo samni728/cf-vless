@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VLESS & VMess 节点批量生成工具 (整合版)</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f4f7f6;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: #fff;
+            padding: 25px 30px;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #0056b3;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .step {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            font-weight: bold;
+            margin-bottom: 8px;
+            color: #555;
+        }
+        input[type="text"],
+        input[type="number"],
+        textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+        textarea {
+            min-height: 120px;
+            resize: vertical;
+        }
+        .button-container {
+            text-align: center;
+            margin: 20px 0;
+        }
+        button {
+            padding: 12px 25px;
+            font-size: 16px;
+            font-weight: bold;
+            color: #fff;
+            background-color: #007bff;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        #copyButton {
+            background-color: #28a745;
+        }
+        #copyButton:hover {
+            background-color: #218838;
+        }
+        .output-container {
+            margin-top: 20px;
+        }
+        #output {
+            background-color: #e9ecef;
+            color: #495057;
+        }
+        .instructions {
+            background-color: #e7f3fe;
+            border-left: 5px solid #007bff;
+            padding: 15px;
+            margin-bottom: 25px;
+            border-radius: 4px;
+        }
+        .suggestion {
+            font-size: 14px;
+            color: #6c757d;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>VLESS & VMess 节点批量生成工具</h1>
+
+        <div class="instructions">
+            <strong>使用说明:</strong>
+            <ol>
+                <li>在“第一步”中粘贴一个完整的 <strong>VLESS 或 VMess</strong> 链接作为模板。</li>
+                <li>在“第二步”中输入多个域名或IP，每行一个。工具会自动给出最大不重复组合数量建议。</li>
+                <li>在“第三步”中指定想生成的节点数量。</li>
+                <li>点击“生成节点”按钮，结果会显示在下方。</li>
+            </ol>
+        </div>
+
+        <div class="step">
+            <label for="templateUrl">第一步：粘贴 VLESS 或 VMess 节点作为模板</label>
+            <input type="text" id="templateUrl" placeholder="vless://... 或 vmess://...">
+        </div>
+
+        <div class="step">
+            <label for="addressList">第二步：输入用于替换的域名或IP (一行一个)</label>
+            <textarea id="addressList" placeholder="例如:&#10;www.visa.com.sg&#10;www.wto.org&#10;104.18.10.122" oninput="updateSuggestion()"></textarea>
+            <p id="suggestion" class="suggestion"></p>
+        </div>
+
+        <div class="step">
+            <label for="quantity">第三步：输入要生成的节点数量</label>
+            <input type="number" id="quantity" value="10" min="1">
+        </div>
+
+        <div class="button-container">
+            <button onclick="generateNodes()">生成节点 (Generate Nodes)</button>
+        </div>
+
+        <div class="output-container">
+            <label for="output">生成结果 (Generated Results):</label>
+            <textarea id="output" readonly></textarea>
+            <div class="button-container">
+                <button id="copyButton" onclick="copyResults()">一键复制所有节点 (Copy All Nodes)</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const httpsPorts = [443, 8443, 2053, 2083, 2087, 2096];
+
+        function updateSuggestion() {
+            const addressListRaw = document.getElementById('addressList').value.trim();
+            const addresses = addressListRaw.split('\n').filter(line => line.trim().length > 0);
+            const maxCombinations = addresses.length * httpsPorts.length;
+            const suggestionEl = document.getElementById('suggestion');
+            if (maxCombinations > 0) {
+                suggestionEl.textContent = `提示: 您输入了 ${addresses.length} 个地址, 共有 ${maxCombinations} 个不重复的“地址:端口”组合。`;
+            } else {
+                suggestionEl.textContent = '';
+            }
+        }
+
+        // --- Base64 安全解码和编码 (URL-safe) ---
+        function safeBase64Decode(str) {
+            try {
+                return atob(str.replace(/-/g, '+').replace(/_/g, '/'));
+            } catch (e) {
+                return null;
+            }
+        }
+        function safeBase64Encode(str) {
+            return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+        }
+
+
+        function generateNodes() {
+            const templateUrl = document.getElementById('templateUrl').value.trim();
+            const addressListRaw = document.getElementById('addressList').value.trim();
+            const quantity = parseInt(document.getElementById('quantity').value, 10);
+            
+            if (!templateUrl || !addressListRaw || isNaN(quantity) || quantity < 1) {
+                alert('请确保所有输入项都已正确填写！');
+                return;
+            }
+
+            const addresses = addressListRaw.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+            if (addresses.length === 0) {
+                alert('输入的域名/IP列表为空或格式不正确。');
+                return;
+            }
+
+            let generatedNodes = [];
+            const protocol = templateUrl.split('://')[0];
+
+            if (protocol === 'vless') {
+                const match = templateUrl.match(/^vless:\/\/([^@]+)@([^:]+):(\d+)(.*)$/);
+                if (!match) {
+                    alert('VLESS 模板链接格式无法解析。'); return;
+                }
+                const [_, uuidPart, __, ___, queryAndFragmentPart] = match;
+                
+                for (let i = 0; i < quantity; i++) {
+                    const randomAddress = addresses[Math.floor(Math.random() * addresses.length)];
+                    const randomPort = httpsPorts[Math.floor(Math.random() * httpsPorts.length)];
+                    generatedNodes.push(`vless://${uuidPart}@${randomAddress}:${randomPort}${queryAndFragmentPart}`);
+                }
+
+            } else if (protocol === 'vmess') {
+                const base64Part = templateUrl.substring("vmess://".length);
+                const decodedStr = safeBase64Decode(base64Part);
+                if (!decodedStr) {
+                     alert('VMess 模板链接的 Base64 部分解码失败！'); return;
+                }
+                
+                try {
+                    let config = JSON.parse(decodedStr);
+                    for (let i = 0; i < quantity; i++) {
+                        let newConfig = JSON.parse(JSON.stringify(config)); // 深拷贝
+                        newConfig.add = addresses[Math.floor(Math.random() * addresses.length)];
+                        newConfig.port = httpsPorts[Math.floor(Math.random() * httpsPorts.length)].toString();
+                        
+                        // 为了美观，可以更新下 "ps" (节点名)
+                        newConfig.ps = `${config.ps || 'VMess Node'}_${newConfig.add}_${newConfig.port}`;
+
+                        generatedNodes.push("vmess://" + btoa(JSON.stringify(newConfig)));
+                    }
+                } catch(e) {
+                    alert('VMess 配置的 JSON 格式解析失败！\n' + e);
+                    return;
+                }
+                
+            } else {
+                alert('不支持的协议类型！请输入 vless:// 或 vmess:// 链接。');
+                return;
+            }
+
+            document.getElementById('output').value = generatedNodes.join('\n');
+        }
+
+        function copyResults() {
+            const outputText = document.getElementById('output').value;
+            if (!outputText) {
+                alert('没有可复制的内容！');
+                return;
+            }
+
+            navigator.clipboard.writeText(outputText).then(() => {
+                alert('已成功复制 ' + outputText.split('\n').length + ' 个节点到剪贴板！');
+            }).catch(err => {
+                console.error('复制失败: ', err);
+                alert('复制失败，请手动复制。可能是浏览器不支持或未授权。');
+            });
+        }
+
+        // 初始化时调用一次建议
+        updateSuggestion();
+    </script>
+
+</body>
+</html>
