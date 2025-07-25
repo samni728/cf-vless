@@ -24,7 +24,7 @@
 │   ├── public/
 │   │   ├── data.js       # 内置的 IP 和域名数据源
 │   │   └── index.html      # 节点生成器的主页面
-│   └── (其他旧文件...)     # ips-v4.txt 等为旧版示例，当前版本不直接使用
+│   └── (其他旧文件...)     # ips-v4.txt 等为旧版示例，当前版本不直接使用 里面也有很多 ipv4 ipv6 的 cloudflare 网段可以参考
 │
 └── worker-page/
     └── _worker.js        # 部署到 Cloudflare Pages 的核心代理脚本
