@@ -1,0 +1,14 @@
+{
+  "name": "cloudflare-vless-proxy",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "lint:worker": "npx eslint worker-page/_worker.js || true",
+    "lint:gen": "npx prettier --check '节点生成/pages/public/*.js' || true",
+    "lint": "npm run lint:worker && npm run lint:gen"
+  },
+  "devDependencies": {
+    "eslint": "^8.56.0",
+    "prettier": "^3.3.1"
+  }
+}
